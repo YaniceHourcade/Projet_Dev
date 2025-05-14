@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import io from 'socket.io-client';
 
-const socket = io('http://localhost:3001'); // Connecte-toi au serveur
+const socket = io('http://localhost:3001');
 
 function App() {
     const [board, setBoard] = useState(Array(9).fill(null));
-    const [isXNext, setIsXNext] = useState(true);
+    const [isMyTurn, setIsMyTurn] = useState(false);
+    const [mySymbol, setMySymbol] = useState(null);
     const [gameOver, setGameOver] = useState(false);
+    const [status, setStatus] = useState("En attente d'un autre joueur...");
 
-    // Fonction pour vérifier si quelqu'un a gagné
     const calculateWinner = (squares) => {
         const lines = [
             [0, 1, 2],
@@ -20,8 +21,7 @@ function App() {
             [0, 4, 8],
             [2, 4, 6]
         ];
-        for (let i = 0; i < lines.length; i++) {
-            const [a, b, c] = lines[i];
+        for (let [a, b, c] of lines) {
             if (squares[a] && squares[a] === squares[b] && squares[a] === squares[c]) {
                 return squares[a];
             }
@@ -29,45 +29,79 @@ function App() {
         return null;
     };
 
-    // Gérer un clic sur une case
     const handleClick = (index) => {
-        if (gameOver || board[index]) return;
-        const newBoard = board.slice();
-        newBoard[index] = isXNext ? 'X' : 'O';
-        setBoard(newBoard);
-        setIsXNext(!isXNext);
-        
-        const winner = calculateWinner(newBoard);
-        if (winner) {
-            setGameOver(true);
-            alert(`${winner} a gagné !`);
-        }
-        socket.emit('move', { index, player: isXNext ? 'X' : 'O' });
+        if (!isMyTurn || board[index] || gameOver) return;
+
+        socket.emit('move', {
+            index,
+            player: mySymbol
+        });
     };
 
     useEffect(() => {
-        socket.on('move', (data) => {
-            const newBoard = board.slice();
-            newBoard[data.index] = data.player;
-            setBoard(newBoard);
+        socket.on('playerSymbol', (symbol) => {
+            setMySymbol(symbol);
+            setIsMyTurn(symbol === 'X'); // X commence
+            setStatus(`Tu es le joueur ${symbol}`);
         });
-    }, [board]);
+
+        socket.on('move', ({ index, player }) => {
+            setBoard(prev => {
+                const updated = [...prev];
+                updated[index] = player;
+                const winner = calculateWinner(updated);
+                if (winner) {
+                    setGameOver(true);
+                    setStatus(`${winner} a gagné !`);
+                } else if (!updated.includes(null)) {
+                    setGameOver(true);
+                    setStatus('Match nul !');
+                } else {
+                    setStatus(`C'est au tour de ${player === 'X' ? 'O' : 'X'}`);
+                    setIsMyTurn(player !== mySymbol);
+                }
+                return updated;
+            });
+        });
+
+        socket.on('full', () => {
+            alert('La partie est déjà pleine !');
+        });
+
+        return () => {
+            socket.off('playerSymbol');
+            socket.off('move');
+            socket.off('full');
+        };
+    }, [mySymbol]);
 
     return (
         <div>
             <h1>Jeu du Morpion</h1>
-            <div className="board">
+            <p>{status}</p>
+            <div className="board" style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 100px)',
+                gridGap: '10px',
+                margin: '20px auto',
+                width: 'max-content'
+            }}>
                 {board.map((square, index) => (
                     <button
                         key={index}
                         className="square"
                         onClick={() => handleClick(index)}
+                        style={{
+                            width: '100px',
+                            height: '100px',
+                            fontSize: '2rem',
+                            cursor: 'pointer'
+                        }}
                     >
                         {square}
                     </button>
                 ))}
             </div>
-            <p>{isXNext ? "C'est au tour de X" : "C'est au tour de O"}</p>
         </div>
     );
 }
